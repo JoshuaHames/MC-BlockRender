@@ -6,40 +6,9 @@ from OpenGL.GLUT import *
 from OpenGL.GLU import *
 from PIL import Image
 from PIL import ImageOps
+import numpy as np
 import math
 import json
-
-# Define vertices, edges, and faces of the cube
-slabVertices = [
-    [1, -0.5, -1],
-    [1, 0.5, -1],
-    [-1, 0.5, -1],
-    [-1, -0.5, -1],
-    [1, -0.5, 1],
-    [1, 0.5, 1],
-    [-1, -0.5, 1],
-    [-1, 0.5, 1]
-]
-
-blockVertices = [
-    [1, -1, -1],
-    [1, 1, -1],
-    [-1, 1, -1],
-    [-1, -1, -1],
-    [1, -1, 1],
-    [1, 1, 1],
-    [-1, -1, 1],
-    [-1, 1, 1]
-]
-
-faces = [
-    (0, 1, 2, 3),
-    (6, 3, 2, 7),
-    (4, 6, 7, 5),
-    (5, 4, 0, 1),
-    (0, 4, 6, 3),
-    (2, 1, 5, 7)
-]
 
 # Texture coordinates for each vertex
 block_coords = [
@@ -49,12 +18,87 @@ block_coords = [
     (1, 1)
 ]
 
-slab_coords = [
-    (1, 0),
-    (0, 0),
-    (0, .5),
-    (1, .5)
-]
+#Finds the centerpoint of this model and translates all points to the be centered on screen
+def CenterVerts(verts, origin):
+    totalVerts = len(verts)
+    updatedVerts = []
+    xOffset = origin[0]
+    yOffset = origin[1]
+    zOffset = origin[2]
+    for vert in verts:
+        xOffset = xOffset + vert[0]
+        yOffset = yOffset + vert[1]
+        zOffset = zOffset + vert[2]
+
+    xOffset = xOffset / totalVerts
+    yOffset = yOffset / totalVerts
+    zOffset = zOffset / totalVerts
+    
+    offsetVector = np.array([xOffset, yOffset, zOffset])
+
+    for vert in verts:
+        updatedVerts.append(vert - offsetVector)
+    
+    return updatedVerts
+
+def Rotate(axis,vector,theta):
+    vector = np.array([vector[0], vector[1], vector[2], 1])
+
+    cos = math.cos(theta)
+    sin = math.sin(theta)
+    rotVector = []
+
+    xRotMat = [[1, 0, 0, 0],
+               [0, cos, sin, 0],
+               [0, -sin, cos, 0],
+               [0, 0, 0, 1]]
+    
+    yRotMat = [[cos, 0, -sin, 0],
+               [0, 1, 0, 0],
+               [sin, 0, cos, 0],
+               [0, 0, 0, 1]]
+
+    zRotMat =  [[cos, -sin, 0, 0 ],
+               [ sin, cos, 0, 0 ],
+               [ 0, 0, 1, 0 ],
+               [ 0, 0, 0, 1 ]]
+    
+    match axis:
+        case 'x':
+            rotVector = np.dot(xRotMat,vector)
+        case 'y':
+             rotVector = np.dot(yRotMat,vector)
+        case 'z':
+             rotVector = np.dot(zRotMat,vector)
+        case _:
+            print("Invalid Axis")
+
+    return np.delete(rotVector, len(rotVector)-1)
+
+def RotateVectors(brushVectors, theta, axis, origin):
+    
+    rotatedVectors = []
+
+    for vector in brushVectors:
+
+        rotatedVectors.append(Rotate(axis, vector, theta))
+
+    return rotatedVectors
+
+def GetBoxVectors(fV, tV):
+    boxVectors = []
+
+    boxVectors.append([fV[0],fV[1],fV[2]])
+    boxVectors.append([fV[0],tV[1],fV[2]])
+    boxVectors.append([tV[0],tV[1],fV[2]])
+    boxVectors.append([tV[0],fV[1],fV[2]])
+    boxVectors.append([tV[0],fV[1],tV[2]])
+    boxVectors.append([tV[0],tV[1],tV[2]])
+    boxVectors.append([fV[0],tV[1],tV[2]])
+    boxVectors.append([fV[0],fV[1],tV[2]])
+
+    return boxVectors
+
 
 def open_local(file_name):
    script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,7 +107,7 @@ def open_local(file_name):
    return open(file_path, 'r')
 
 # Will return verticies only for now
-def getVerticies(file):
+def getVerticies(file, rot):
     if file.endswith('.json'):
         openFile = open_local(file)
         data = json.load(openFile)
@@ -72,39 +116,22 @@ def getVerticies(file):
 
         of = 0
         for brush in data["elements"]:
-            fx, fy, fz = brush["from"]
-            tx, ty, tz = brush["to"]
-
+            fromVector = brush["from"]
+            toVector = brush["to"]
             
+            brushVectors = GetBoxVectors(fromVector, toVector)
+            brushVectors = CenterVerts(brushVectors, [0,0,0])
 
             if ('rotation' in brush):
-                angle = brush['rotation']['angle']
+                theta = math.radians(brush['rotation']['angle'])
                 axis = brush['rotation']['axis']
                 origin = brush['rotation']['origin']
-
-                frot = rotate_vector(np.array([fx, fy, fz]), axis, angle, origin)
-                trot = rotate_vector(np.array([tx, ty, tz]), axis, angle, origin)
-                fx = frot[0]
-                fy = frot[1]
-                fz = frot[2]
-
-                tx = trot[0]
-                ty = trot[1]
-                tz = trot[2]
-                
-            
-            #fx, fy, fz = center_vector(fx, fy, fz)
-            #tx, ty, tz = center_vector(tx, ty, tz)
+                brushVectors = RotateVectors(brushVectors, theta, axis, origin)
 
 
-            verts.append([fx,fy,fz])
-            verts.append([fx,ty,fz])
-            verts.append([tx,ty,fz])
-            verts.append([tx,fy,fz])
-            verts.append([tx,fy,tz])
-            verts.append([tx,ty,tz])
-            verts.append([fx,ty,tz])
-            verts.append([fx,fy,tz])
+            for vector in brushVectors:
+                verts.append(vector)
+
 
             faces.append((0+of, 1+of, 2+of, 3+of))
             faces.append((3+of, 2+of, 5+of, 4+of))
@@ -114,6 +141,7 @@ def getVerticies(file):
             faces.append((1+of, 6+of, 5+of, 2+of))
 
             of = of+8
+
         return verts, faces
 
 
@@ -244,14 +272,14 @@ def main():
     glLightfv(GL_LIGHT1, GL_AMBIENT, ambient_color) # Set ambient light color
 
     glMatrixMode(GL_MODELVIEW)
-    glTranslatef(0.0, 0.0, -20)
+    glTranslatef(0.0, 0.0, -30)
     
     glRotatef(30, 1, 0, 0)
     glRotatef(45, 0, 1, 0)
 
     parentPath = getParentModel("create\models\item\cogwheel.json")
 
-    newverts, newfaces = getVerticies(parentPath)
+    newverts, newfaces = getVerticies(parentPath, 0)
 
     texture_ids = glGenTextures(len(textures))
     for i, texture in enumerate(textures):
@@ -270,11 +298,12 @@ def main():
                 pygame.quit()
                 quit()
 
+        #newverts, newfaces = getVerticies(parentPath, rot)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glRotatef(1, 3, 1, 1)  # Rotate the cube slowly
         draw_shape(newfaces, newverts, block_coords)
         pygame.display.flip()
-        pygame.time.wait(10)
+        pygame.time.wait(20)
 main()
 
 #parentPath = getParentModel("create\models\item\\andesite_encased_shaft.json")
